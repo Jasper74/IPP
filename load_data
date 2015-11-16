@@ -1,0 +1,29 @@
+setwd("C:/Users/JasperF/Desktop/LEI - Irrigation Potential Project")  #Laptop/Home
+setwd("C:/Users/flori007/Desktop/LEI - Irrigation Potential Project") #LEI
+library(foreign)
+library(ggplot2)
+
+#'Irrigation Potential Project 
+#'permalink for data files: http://go.worldbank.org/CA726BCCP0
+#'
+#'Information on agriculture is found in section 2 (rainy season) and section 3 (contre-saison).
+#'[hid] indicates the household id
+
+load <- function(){
+  cat("  Labour (unit/ha)              2A / 3A (q20-q27)               ecvmaas2b_p1_en
+  Labour costs ($/ha)           2A / 3A (q20-q27)               ecvmamen_p1_en
+  Other input costs ($/ha)      2C, 2D, 3C, 3D                  ecvmaas2c_p1_en, ecvmaas2d_p2_en, ecvmaas3c_p1_en, ecvmaas3d_p1_en
+  N fertilizer price ($/kg)     2C, 3C                          ecvmaas2c_p1_en, ecvmaas3c_p1_en
+  P fertilizer price ($/kg)     2C, 3C                          ecvmaas2c_p1_en, ecvmaas3c_p1_en
+  K fertilizer price ($/kg)     2C, 3C                          ecvmaas2c_p1_en, ecvmaas3c_p1_en
+  Irrigation costs ($/ha)       1 (q34-q39), 2D, 3D             ecvmaas1_p2_en, ecvmaas2d_p2_en, ecvmaas3d_p1_en")
+  
+  section <- readline(prompt="Load section: ")
+  section <- as.character(section)
+  section_name <- paste("NIGER/DATA/",section,".dta",sep="")
+  section_data <- read.dta(section_name)
+  return(section_data)
+}
+
+agr_s1 <- read.dta("NIGER/DATA/ecvmaas1_p1_en.dta")
+
