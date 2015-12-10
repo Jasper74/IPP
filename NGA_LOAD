@@ -1,0 +1,272 @@
+#######################################
+########## NIGERIA 2012-13 ###########
+#######################################
+
+#Permalink for data files: http://go.worldbank.org/1O3UK5WO00
+
+#Set the path for storage of output 
+dataPath <- "Nigeria/DATA"
+# dataPath <- "C:/Users/Tomas/Documents/LEI/data/TZA"
+# Set the working directory to the appropriate folder for Niger
+wdPath <- "Desktop/LEI - Irrigation Potential Project/"
+setwd(wdPath)
+
+library(haven)
+library(stringr)
+library(plyr)
+library(dplyr)
+library(foreign)
+
+options(scipen=999)
+
+#######################################
+############### OUTPUT AND VALUE ######
+#######################################
+
+# WDswitch
+oput <- read_dta(file.path(dataPath, "Post Harvest Wave 2/Agriculture/secta3_harvestw2.dta")) %>%
+  dplyr::select(hhid, plotid, state, cropid, cropname, cropcode, 
+         harv_area=sa3q5a, area_unit=sa3q5b, qty=sa3q6a1, qty_unit=sa3q6a2)
+
+# loading conversion data and joining to obtain accurate estimates of harvest weights
+conv <- read_dta("Nigeria/DATA/w2agnsconversion.dta") %>%  
+  dplyr::select(cropname, qty_unit=nscode, conversion)
+oput <- left_join(oput, conv)
+
+oput$qty_unit[oput$qty_unit==2] <- 0.001
+#oput$qty_unit[oput$qty_unit==3] <- NA  #litres (1l = 1kg?)
+#oput$qty_unit[oput$qty_unit==4] <- NA  #centiliters (1l = 100cl?)
+oput$conversion <- ifelse(is.na(oput$conversion), oput$qty_unit, oput$conversion)
+
+oput$harv_kg <- oput$qty * oput$conversion
+oput <- dplyr::filter(oput, harv_kg>0)
+
+oput <- dplyr::select(oput, hhid, state, plotid, cropid, cropname, cropcode, harv_kg)
+
+#######################################
+############# CHEMICAL ################
+#######################################
+
+# Load data
+ir <- read_dta(file.path(dataPath, "Post Planting Wave 2/Agriculture/sect11b1_plantingw2.dta")) %>%
+  dplyr::select(hhid, plotid, state, irrig=s11b1q39, irrig_source=s11b1q40, irrig_method1=s11b1q41a, 
+                irrig_method2=s11b1q41b, irrig_method3=s11b1q41c, irrigation_season=s11b1q42)
+ir <- data.frame(lapply(ir, unclass))
+ir$irrig_method3 <- as.numeric(ir$irrig_method3)
+
+#Remove observations that have NA for irrigation use 
+ir <- ir[!is.na(ir$irrig),]
+#If no irrigation use, use of irrigation sources and methods is 0
+ir[ir$irrig==2,c(4:9)] <- 0
+ir <- ir[!is.na(ir$irrig_source),]
+ir[is.na(ir)] <- 0
+
+ip <- read_dta(file.path(dataPath, "Post Planting Wave 2/Agriculture/sect11c2_plantingw2.dta")) %>%
+  dplyr::select(hhid, plotid,
+  #Pesticides
+  pest_use=s11c2q1, pest_cost=s11c2q4a, pest_cost2=s11c2q4b, pest_ik=s11c2q5a, pest_ik2=s11c2q5b,
+  #Herbicides
+  herb_use=s11c2q10, herb_cost=s11c2q13a, herb_cost2=s11c2q13b, herb_ik=s11c2q14a, herb_ik2=s11c2q14b,
+  #Animals
+  anim_use=s11c2q19, anim_days=s11c2q21, anim_cost=s11c2q23a, anim_cost_unit=s11c2q23b,
+  anim_ik=s11c2q24a, anim_ik_unit=s11c2q24b, anim_feed=s11c2q25,
+  #Machine
+  mach_use=s11c2q27, mach_cost=s11c2q29, mach_cost=s11c2q32, mach_ik=s11c2q32)
+
+ip <- data.frame(lapply(ip, unclass))
+ip <- ip[!is.na(ip$pest_use) & !is.na(ip$herb_use) & !is.na(ip$anim_use) & !is.na(ip$mach_use),]
+
+ip[ip$pest_use==2, c("pest_use","pest_cost", "pest_cost2", "pest_ik", "pest_ik2")] <- 0
+ip[ip$herb_use==2, c("herb_use","herb_cost","herb_cost2","herb_ik","herb_ik2")] <- 0
+ip[ip$anim_use==2, c("anim_use","anim_days","anim_cost","anim_cost_unit","anim_ik","anim_ik_unit","anim_feed")] <- 0
+ip[ip$mach_use==2, c("mach_use","mach_cost","mach_ik")] <- 0
+
+#Filter out observations with pesticide use but NA values
+ip <- ip[!is.na(ip$pest_cost),]
+#Similarly for herbicide, animal and machine use
+ip <- ip[!is.na(ip$herb_cost),]
+ip <- ip[!is.na(ip$anim_cost),]
+ip <- ip[!is.na(ip$mach_cost),]
+
+ip[is.na(ip)] <- 0
+
+#Animal costs (try to make something of the weird units)
+#1: hours 2: days 3: month 4: acre 5: hectare 6: planting period 7:other
+anim_conv <- data.frame(anim_cost_unit = c(0:7), conv=c(0,24,1,NA,NA,NA,NA,NA))
+anim_conv_ik <- data.frame(anim_ik_unit = c(0:7), conv_ik=c(0,24,1,NA,NA,NA,NA,NA))
+ip <- left_join(ip, anim_conv)
+ip <- left_join(ip, anim_conv_ik)
+
+#Probably wise to take a closer look at this ***REQUIRED ADDITIONAL WORK***
+ip <- within(ip, anim_cost <- anim_days * anim_cost * conv)
+ip <- within(ip, anim_ik <- anim_ik * anim_ik * conv_ik)
+
+#Total input costs
+ip <- within(ip, ip_cost <- pest_cost+pest_cost2+pest_ik+pest_ik2+herb_cost+herb_cost2+herb_ik+herb_ik2+anim_cost+anim_ik+
+         mach_cost+mach_ik)
+
+ip <- dplyr::select(ip, hhid, plotid, ip_cost)
+
+#######################################
+############### FERTILIZER ############
+#######################################\
+
+fr <- read_dta(file.path(dataPath, "Post Planting Wave 2/Agriculture/sect11d_plantingw2.dta")) %>%
+  dplyr::select(hhid, plotid, fertilizer_use=s11dq1,
+                #Leftover 
+                lofert_use = s11dq2, lofert_type=s11dq3, lofert_kg=s11dq4, 
+                #Free
+                freefert_use=s11dq6, freefert_type=s11dq7, freefert_kg=s11dq8, freefert_cost=s11dq10,
+                #Fert commercial source 1
+                comfert_use=s11dq12, comfert_type=s11dq15, comfert_kg=s11dq16, comfert_cost=s11dq17, comfert_val=s11dq19,
+                #Fert commercial source 2
+                comfert_use2=s11dq24, comfert_type2=s11dq27, comfert_kg2=s11dq28, comfert_cost2=s11dq31, comfert_val2=s11dq29
+  )
+
+fr <- data.frame(lapply(fr, unclass))
+fr <- fr[!is.na(fr$fertilizer_use),]
+fr[fr$fertilizer_use==2, c("lofert_use","freefert_use","comfert_use","comfert_use2")] <- 2
+fr <- fr[!is.na(fr$lofert_use) & !is.na(fr$freefert_use) & !is.na(fr$comfert_use) & !is.na(fr$comfert_use2),]
+
+fr[fr$lofert_use==2, c("lofert_type","lofert_kg")] <- 0
+fr[fr$freefert_use==2, c("freefert_type","freefert_kg", "freefert_cost")] <- 0
+fr[fr$comfert_use==2, c("comfert_type","comfert_kg","comfert_val","comfert_cost")] <- 0
+fr[fr$comfert_use2==2, c("comfert_type2","comfert_kg2","comfert_val2","comfert_cost2")] <- 0
+
+#Total fert costs
+fr <- within(fr, fert_cost <- freefert_cost + comfert_cost + comfert_cost2 + comfert_val + comfert_val2)
+
+fr <- dplyr::select(fr, hhid, plotid, fert_cost)
+
+#######################################
+############### SEED ##################
+#######################################
+
+seed <- read_dta(file.path(dataPath, "Post Planting Wave 2/Agriculture/sect11e_plantingw2.dta")) %>%
+  dplyr::select(hhid, plotid, crop=cropname, allseed_use=s11eq3, seedtype=s11eq5, 
+                #Free
+                freeseed_use=s11eq8, freeseed_cost=s11eq12,
+                #Purchased seeds
+                seed_use=s11eq14, seed_type=s11eq17, seed_transport=s11eq19, seed_cost=s11eq21, 
+                seed_use2=s11eq26, seed_type2=s11eq29, seed_transport2=s11eq31, seed_cost2=s11eq33
+                )
+
+seed <- data.frame(lapply(seed, unclass))
+
+#If seed use is NA, remove the observation row
+seed <- seed[!is.na(seed$allseed_use),]
+#If seed use is 2 (no), then the types of used seed should also be 2 (no)
+seed[seed$allseed_use==2, c("freeseed_use","seed_use","seed_use2")] <- 2
+  
+seed <- seed[!is.na(seed$freeseed_use),]
+seed[seed$freeseed_use==2, "freeseed_cost"] <- 0 
+seed <- seed[!is.na(seed$seed_use),] 
+seed[seed$seed_use==2, c("seed_use2")] <- 2
+
+seed[seed$seed_use==2, c("seed_type","seed_transport","seed_cost")] <- 0
+seed <- seed[!is.na(seed$seed_use2),]
+seed[seed$seed_use2==2, c("seed_type2","seed_transport2","seed_cost2")] <- 0
+
+#All NA's that are left now should be 0?
+seed[is.na(seed)] <- 0
+
+seed <- within(seed, seed_cost <- freeseed_cost + seed_transport + seed_cost + seed_transport2 + seed_cost2)
+
+#######################################
+############### LABOUR ################
+#######################################
+
+# WDswitch
+lab <- read_dta(file.path(dataPath, "Post Planting Wave 2/Agriculture/sect11c1_plantingw2.dta")) %>%
+  dplyr::select( hhid, plotid, 
+                 #Family labour
+                 fam1_weeks=s11c1q1a2, fam1_daysweek=s11c1q1a3, fam1_hours=s11c1q1a4,
+                 fam2_weeks=s11c1q1b2, fam2_daysweek=s11c1q1b3, fam2_hours=s11c1q1b4,
+                 fam3_weeks=s11c1q1c2, fam3_daysweek=s11c1q1c3, fam3_hours=s11c1q1c4,
+                 fam4_weeks=s11c1q1d2, fam4_daysweek=s11c1q1d3, fam4_hours=s11c1q1d4,
+                 #Hired
+                 n_men=s11c1q2, men_days=s11c1q3, men_avgwage=s11c1q4,
+                 n_women=s11c1q5, women_days=s11c1q6, women_avgwage=s11c1q7,
+                 n_child=s11c1q8, child_days=s11c1q9, child_avgwage=s11c1q10
+                 )
+
+#Remove all NA rows
+lab <- lab[rowSums(is.na(lab))!=21, ]
+lab[is.na(lab)] <- 0
+
+lab <- within(lab, fam_labhrs <- (fam1_weeks*fam1_daysweek*fam1_hours) +
+                (fam2_weeks*fam2_daysweek*fam2_hours) +
+                (fam3_weeks*fam3_daysweek*fam3_hours) + 
+                (fam4_weeks*fam4_daysweek*fam4_hours))
+
+lab <- within(lab, lab_hire_days <- (n_men*men_days) + (n_women*women_days) + (n_child*child_days))
+lab <- within(lab, lab_hire_cost <- (n_men*men_days*men_avgwage) + (n_women*women_days*women_avgwage) + (n_child*child_days*child_avgwage))
+
+#######################################
+############### LABOUR HARVEST ########
+#######################################
+
+# WDswitch
+labh <- read_dta(file.path(dataPath, "Post Harvest Wave 2/Agriculture/secta2_harvestw2.dta")) %>%
+  dplyr::select( hhid, plotid, 
+                 #Family labour
+                 fam1_weeks=sa2q1a2, fam1_daysweek=sa2q1a3, fam1_hours=sa2q1a4,
+                 fam2_weeks=sa2q1b2, fam2_daysweek=sa2q1b3, fam2_hours=sa2q1b4,
+                 fam3_weeks=sa2q1c2, fam3_daysweek=sa2q1c3, fam3_hours=sa2q1c4,
+                 fam4_weeks=sa2q1d2, fam4_daysweek=sa2q1d3, fam4_hours=sa2q1d4,
+                 #Hired
+                 n_men=sa2q2, men_days=sa2q3, men_avgwage=sa2q4,
+                 n_women=sa2q5, women_days=sa2q6, women_avgwage=sa2q7,
+                 n_child=sa2q8, child_days=sa2q9, child_avgwage=sa2q10
+  )
+
+labh <- as.data.frame(lapply(labh, unclass))
+
+#Remove all NA rows
+labh <- labh[rowSums(is.na(labh))!=21, ]
+labh[is.na(labh)] <- 0
+
+labh <- within(labh, fam_labhhrs <- (fam1_weeks*fam1_daysweek*fam1_hours) +
+                (fam2_weeks*fam2_daysweek*fam2_hours) +
+                (fam3_weeks*fam3_daysweek*fam3_hours) + 
+                (fam4_weeks*fam4_daysweek*fam4_hours))
+
+labh <- within(labh, labh_hire_days <- (n_men*men_days) + (n_women*women_days) + (n_child*child_days))
+labh <- within(labh, labh_hire_cost <- (n_men*men_days*men_avgwage) + (n_women*women_days*women_avgwage) + (n_child*child_days*child_avgwage))
+
+#Total labour
+lab <- dplyr::select(lab, hhid, plotid, fam_labhrs, lab_hire_days, lab_hire_cost)
+labh <- dplyr::select(labh, hhid, plotid, fam_labhhrs, labh_hire_days, labh_hire_cost)
+
+lab <- left_join(lab, labh)
+lab$total_fam_hours <- lab$fam_labhrs + lab$fam_labhhrs
+lab$total_hire_days <- lab$lab_hire_days + lab$labh_hire_days 
+lab$total_hire_cost <- lab$lab_hire_cost + lab$labh_hire_cost
+
+lab <- dplyr::select(lab, hhid, plotid, total_fam_hours, total_hire_days, total_hire_cost)
+
+#######################################
+############### AREAs #################
+#######################################
+
+# WDswitch
+area <- read_dta(file.path(dataPath, "Post Planting Wave 2/Agriculture/sect11a1_plantingw2.dta")) %>%
+  dplyr::select(hhid, plotid, est=s11aq4a, est_unit=s11aq4b, gps=s11aq4c) 
+
+plot <- read_dta(file.path(dataPath, "Post Planting Wave 2/Agriculture/sect11f_plantingw2.dta")) %>% 
+  dplyr::select(hhid, plotid, method=s11fq2)
+
+plot <- dplyr::filter(plot, method==1)
+
+plot$plot_id <- paste(plot$hhid, plot$plotid, sep="")
+oput$plot_id <- paste(oput$hhid, oput$plotid, sep="")
+
+nga <- oput[oput$plot_id %in% plot$plot_id,]
+nga <- left_join(nga, ip)
+nga <- left_join(nga, fr)
+nga <- left_join(nga, seed)
+nga <- left_join(nga, ir)
+nga <- left_join(nga, area)
+nga <- left_join(nga, lab)
+
+
